@@ -1,57 +1,128 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import Papa, { ParseResult } from 'papaparse';
 import CytoscapeComponent from 'react-cytoscapejs';
-import { ElementDefinition } from 'cytoscape';
-import { pipe, replace } from 'ramda';
-import { Button, VStack, Heading, HStack } from '@chakra-ui/react';
+import Cytoscape, { EdgeDataDefinition, ElementDefinition } from 'cytoscape';
+import {
+  Button,
+  VStack,
+  Heading,
+  HStack,
+  useDisclosure,
+  Box,
+  Card,
+  CardBody,
+  Text,
+  ScaleFade,
+  Divider,
+} from '@chakra-ui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowBackIcon } from '@chakra-ui/icons';
-import { ExcludedPhrases } from 'renderer/comoponents';
+import {
+  ArrowBackIcon,
+  DownloadIcon,
+  RepeatIcon,
+  SettingsIcon,
+} from '@chakra-ui/icons';
+import { ExcludedPhrases, SettingsDrawer } from 'renderer/comoponents';
+import { add } from 'ramda';
+import fcose from 'cytoscape-fcose';
+
+import { useSettings } from '../contexts';
+
+Cytoscape.use(fcose);
 
 const STATEMENT_COL = 13;
 const SESSION_COL = 3;
-const LOG_TYPE_COL = 10;
+const TRANSACTION_COL = 9;
 
 function Graph() {
   const [elements, setElements] = useState<ElementDefinition[]>([]);
   const [excludedPhrases, setExcludedPhrases] = useState<string[]>([
     'pg_database',
+    'BEGIN',
+    'COMMIT',
+    'ROLLBACK',
   ]);
   const { state } = useLocation();
   const navigate = useNavigate();
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [highlightedEdge, setHighlightedEdge] = useState<
+    (EdgeDataDefinition & { label: string }) | undefined
+  >();
+  const { settings } = useSettings();
+  const [key, forceRefresh] = useReducer(add(1), 0);
 
-  const transformData = (data: ParseResult<string[]>) => {
+  const transformData = (data: string[][], isTransactionView: boolean) => {
     const nodes: ElementDefinition[] = [];
     const edges: ElementDefinition[] = [];
-    let lastSession: string | undefined;
+    let highestWeight = 1;
 
-    data.data.forEach((row) => {
-      let statement = row[STATEMENT_COL];
-      const session = row[SESSION_COL];
+    let logData = data
+      .filter((row) => row[STATEMENT_COL]?.includes('statement: '))
+      .map((row) => ({
+        statement: row[STATEMENT_COL].replace('statement: ', '').replace(
+          /'(.*?)'|(?<= |=|\(|,)\d+/g,
+          '?'
+        ),
+        session: row[SESSION_COL],
+        transaction: row[TRANSACTION_COL],
+      }));
 
-      if (!statement?.includes('statement:')) return;
+    if (isTransactionView)
+      logData = logData.map((log, index) =>
+        logData.some(
+          (_log, _index) =>
+            log.transaction === _log.transaction && index !== _index
+        )
+          ? { ...log, statement: `T:${log.statement}` }
+          : log
+      );
 
-      statement = pipe(
-        replace('statement:', ''),
-        replace(/'(.*?)'|\d/g, '?')
-      )(statement);
+    logData.forEach((log, index) => {
+      // Find edge if it already exists.
+      const edgeIndex = edges.findIndex(
+        (edge) =>
+          edge.data.source === log.statement &&
+          edge.data.target === logData[index - 1]?.statement
+      );
 
-      if (nodes[nodes.length - 1]?.data.id && session === lastSession)
+      // If edge exists, increment weight. If weight is higher than highest weight, update highest weight.
+      if (edgeIndex !== -1) {
+        edges[edgeIndex].data.weight += 1;
+        edges[edgeIndex].data.label = edges[edgeIndex].data.weight.toString();
+        if (edges[edgeIndex].data.weight > highestWeight)
+          highestWeight = edges[edgeIndex].data.weight;
+        return;
+      }
+
+      // If the previous statement was from the same session, create an edge.
+      if (log.session === logData[index - 1]?.session)
         edges.push({
           data: {
-            source: nodes[nodes.length - 1].data.id,
-            target: statement,
+            source: log.statement,
+            target: logData[index - 1]?.statement,
+            weight: 1,
+            label: '1',
+            isTransaction:
+              isTransactionView &&
+              log.transaction === logData[index - 1]?.transaction,
           },
         });
 
+      // Create node.
       nodes.push({
         data: {
-          id: statement,
-          label: statement,
+          id: log.statement,
+          label:
+            log.statement.length > 50
+              ? `${log.statement.slice(0, 50)} ...`
+              : log.statement,
         },
       });
+    });
 
-      lastSession = session;
+    edges.map((edge) => {
+      edge.data.weight /= highestWeight / 2;
+      return edge;
     });
 
     setElements([...nodes, ...edges]);
@@ -62,55 +133,168 @@ function Graph() {
       excludedPhrases.every((phrase) => !element.data.label?.includes(phrase))
     );
 
+  const handleDownload = () => {
+    const data = JSON.stringify(elements);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = 'graph.json';
+    link.href = url;
+    link.click();
+  };
+
   useEffect(() => {
-    Papa.parse(state.file, {
-      complete: transformData,
-    });
-  }, [state]);
+    if (state.file)
+      Papa.parse(state.file, {
+        complete: (results: ParseResult<string[]>) => {
+          transformData(
+            results.data.filter((row) =>
+              excludedPhrases.every(
+                (phrase) => !row[STATEMENT_COL]?.includes(phrase)
+              )
+            ),
+            settings.isTransactionView
+          );
+          forceRefresh();
+        },
+      });
+    else {
+      const fileReader = new FileReader();
+      fileReader.readAsText(state.exportedFile);
+      fileReader.onload = (event) =>
+        typeof event?.target?.result === 'string' &&
+        setElements(JSON.parse(event?.target?.result));
+    }
+  }, [excludedPhrases, settings.isTransactionView, state]);
 
   return (
-    <VStack padding={4} spacing={4} align="flex-start" overflow="hidden">
-      <HStack>
-        <Button
-          size="sm"
-          onClick={() => navigate('/')}
-          leftIcon={<ArrowBackIcon />}
-        >
-          Go back
-        </Button>
-        <Heading size="md">{state.file.name}</Heading>
+    <VStack padding={4} spacing={4} align="flex-start">
+      <HStack justifyContent="space-between" width="100%">
+        <HStack>
+          <Button
+            size="sm"
+            onClick={() => navigate('/')}
+            leftIcon={<ArrowBackIcon />}
+          >
+            Go back
+          </Button>
+          <Heading size="md">
+            {state.file?.name ?? state.exportedFile.name}
+          </Heading>
+        </HStack>
+        <HStack>
+          <Button
+            size="sm"
+            onClick={handleDownload}
+            leftIcon={<DownloadIcon />}
+            isDisabled={!state.file}
+          >
+            Export graph
+          </Button>
+          <Button size="sm" onClick={forceRefresh} leftIcon={<RepeatIcon />}>
+            Refresh
+          </Button>
+          <Button size="sm" onClick={onOpen} leftIcon={<SettingsIcon />}>
+            Settings
+          </Button>
+        </HStack>
       </HStack>
-      <ExcludedPhrases
-        excludedPhrases={excludedPhrases}
-        onExcludePhrasesChange={setExcludedPhrases}
-      />
-      {elements.length && (
-        <CytoscapeComponent
-          layout={{
-            name: 'cose',
-            animate: true,
-            componentSpacing: 100,
-          }}
-          elements={getFilteredElements()}
-          style={{ width: '100vw', height: '100vh' }}
-          stylesheet={[
-            {
-              selector: 'node',
-              style: {
-                label: 'data(label)',
-                backgroundColor: '#4299E1',
-              },
-            },
-            {
-              selector: 'edge',
-              style: {
-                'mid-target-arrow-shape': 'triangle',
-                width: 2,
-              },
-            },
-          ]}
+      {state.file && (
+        <ExcludedPhrases
+          excludedPhrases={excludedPhrases}
+          onExcludePhrasesChange={setExcludedPhrases}
         />
       )}
+      <Box overflow="hidden">
+        <ScaleFade in={!!highlightedEdge}>
+          {highlightedEdge && (
+            <Box
+              position="absolute"
+              zIndex={10}
+              backgroundColor="white"
+              marginRight={4}
+            >
+              <Card backgroundColor="gray.200">
+                <CardBody>
+                  <VStack spacing={1} align="start">
+                    <HStack>
+                      <Heading size="xs">Source:</Heading>
+                      <Heading size="xs" fontWeight="normal">
+                        {highlightedEdge.target}
+                      </Heading>
+                    </HStack>
+                    <HStack>
+                      <Heading size="xs">Target:</Heading>
+                      <Heading size="xs" fontWeight="normal">
+                        {highlightedEdge.source}
+                      </Heading>
+                    </HStack>
+                    <Divider />
+                    <Text fontSize="sm">
+                      This sequence occured {highlightedEdge.label} times
+                    </Text>
+                    {highlightedEdge.isTransaction && (
+                      <Text fontSize="sm" color="blue.600">
+                        This sequence occured in a transaction
+                      </Text>
+                    )}
+                  </VStack>
+                </CardBody>
+              </Card>
+            </Box>
+          )}
+        </ScaleFade>
+        {elements.length && (
+          <CytoscapeComponent
+            key={key}
+            cy={(cy) => {
+              cy.on('tap', 'edge', (event) => {
+                setHighlightedEdge(event.target.data());
+              });
+              cy.on('tap', (event) => {
+                if (event.target === cy) setHighlightedEdge(undefined);
+              });
+            }}
+            layout={{ name: settings.layout }}
+            elements={getFilteredElements()}
+            style={{
+              height: state.file ? 'calc(100vh - 261px)' : 'calc(100vh - 78px)',
+              width: 'calc(100vw - 32px)',
+            }}
+            stylesheet={[
+              {
+                selector: 'node',
+                style: {
+                  label: 'data(label)',
+                  backgroundColor: '#4299E1',
+                  'font-size': settings.fontSize,
+                  width: 10,
+                  height: 10,
+                  'font-weight': 'bold',
+                },
+              },
+              {
+                selector: 'edge',
+                style: {
+                  'line-color': (node) =>
+                    node.data('isTransaction') ? '#7fb3dd' : '#b3b3b3',
+                  'mid-source-arrow-color': (node) =>
+                    node.data('isTransaction') ? '#7fb3dd' : '#b3b3b3',
+                  'mid-source-arrow-shape': 'triangle',
+                  'arrow-scale': 0.6,
+                  width: 'data(weight)',
+                  'curve-style': 'bezier',
+                },
+              },
+            ]}
+          />
+        )}
+      </Box>
+      <SettingsDrawer
+        isTransactionViewDisabled={!!state.exportedFile}
+        isOpen={isOpen}
+        onClose={onClose}
+      />
     </VStack>
   );
 }
