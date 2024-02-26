@@ -39,8 +39,6 @@ function Graph() {
   const [excludedPhrases, setExcludedPhrases] = useState<string[]>([
     'pg_database',
     'BEGIN',
-    'COMMIT',
-    'ROLLBACK',
   ]);
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -60,7 +58,7 @@ function Graph() {
       .filter((row) => row[STATEMENT_COL]?.includes('statement: '))
       .map((row) => ({
         statement: row[STATEMENT_COL].replace('statement: ', '').replace(
-          /'(.*?)'|(?<= |=|\(|,)\d+/g,
+          /\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g,
           '?'
         ),
         session: row[SESSION_COL],
