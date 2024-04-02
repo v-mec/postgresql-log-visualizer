@@ -1,0 +1,157 @@
+[
+  {
+    "sequence": [
+      "SELECT customer_id FROM customer WHERE first_name = 'John' AND last_name = 'Doe';",
+      "UPDATE address SET address = '123 Main St', district = 'Downtown', city_id = 1 WHERE address_id = (SELECT address_id FROM customer WHERE customer_id = 1);",
+      "UPDATE customer SET active = 1 WHERE customer_id = 1;"
+    ],
+    "weight": 10
+  },
+  {
+    "sequence": [
+      "SELECT actor_id FROM actor WHERE first_name = 'Tom' AND last_name = 'Hanks';",
+      "SELECT film.title FROM film JOIN film_actor ON film.film_id = film_actor.film_id WHERE film_actor.actor_id = 1;"
+    ],
+    "weight": 5
+  },
+  {
+    "sequence": [
+      "SELECT customer_id FROM customer WHERE first_name = 'John' AND last_name = 'Doe';",
+      "INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date) VALUES (245, 1, 1000, 5, now());",
+      "SELECT * FROM payment WHERE payment_id = currval('payment_payment_id_seq');"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "SELECT store_id FROM store WHERE address_id = 3;",
+      "SELECT staff.first_name, staff.last_name FROM staff WHERE staff.store_id = 1;",
+      "UPDATE customer SET active = 1 WHERE customer_id = 1;"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "SELECT store_id FROM store WHERE address_id = 3;",
+      "SELECT staff.first_name, staff.last_name FROM staff WHERE staff.store_id = 1;",
+      "SELECT category_id, COUNT(*) FROM film_category JOIN rental ON film_category.film_id = rental.inventory_id GROUP BY category_id;",
+      "UPDATE customer SET active = 1 WHERE customer_id = 1;"
+    ],
+    "weight": 3
+  },
+  {
+    "sequence": [
+      "INSERT INTO address (address, district, city_id, postal_code, phone) VALUES ('456 Elm St', 'Midtown', 1, '12345', '555-1234');",
+      "SELECT currval('address_address_id_seq');",
+      "INSERT INTO customer(store_id, first_name, last_name, email, address_id, active) VALUES(1, 'Jane', 'Doe', 'jane.doe@example.com', 1, 1)"
+    ],
+    "weight": 2
+  },
+  {
+    "sequence": [
+      "SELECT customer_id FROM customer WHERE first_name = 'John' AND last_name = 'Doe';",
+      "UPDATE film SET rental_rate = rental_rate * 1.1 WHERE release_year = 2005;",
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 5;"
+    ],
+    "weight": 4
+  },
+  {
+    "sequence": [
+      "SELECT category_id FROM category WHERE name = 'Action';",
+      "SELECT inventory.film_id, COUNT(*) FROM rental JOIN inventory ON rental.inventory_id = inventory.inventory_id JOIN film_category ON inventory.film_id = film_category.film_id WHERE film_category.category_id = 1 GROUP BY inventory.film_id ORDER BY COUNT(*) DESC LIMIT 5;"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "INSERT INTO language (name) VALUES ('German');",
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 5;",
+      "SELECT * FROM language WHERE language_id = currval('language_language_id_seq')"
+    ],
+    "weight": 3
+  },
+  {
+    "sequence": [
+      "SELECT staff_id, SUM(amount) FROM payment GROUP BY staff_id;",
+      "UPDATE customer SET active = 1 WHERE customer_id = 1;"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "UPDATE film SET rental_duration = 7 WHERE title = 'The Godfather';",
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 5;",
+      "SELECT rental_duration FROM film WHERE title = 'The Godfather';"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 5;",
+      "INSERT INTO language (name) VALUES ('German');"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "SELECT actor_id FROM actor WHERE first_name = 'Emma' AND last_name = 'Watson';",
+      "SELECT film.title FROM film JOIN film_actor ON film.film_id = film_actor.film_id WHERE film_actor.actor_id = 5;"
+    ],
+    "weight": 7
+  },
+  {
+    "sequence": [
+      "INSERT INTO address (address, district, city_id, postal_code, phone) VALUES ('789 Oak St', 'Uptown', 2, '54321', '555-5678');",
+      "SELECT currval('address_address_id_seq');",
+      "INSERT INTO customer(store_id, first_name, last_name, email, address_id, active) VALUES(2, 'Michael', 'Smith', 'michael.smith@example.com', 2, 1);"
+    ],
+    "weight": 5
+  },
+  {
+    "sequence": [
+      "SELECT staff_id FROM staff WHERE username = 'admin' AND password = 'password';",
+      "INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date) VALUES (456, 3, 1001, 7, now());",
+      "SELECT * FROM payment WHERE payment_id = currval('payment_payment_id_seq');"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "SELECT store_id FROM store WHERE address_id = 2;",
+      "SELECT staff.first_name, staff.last_name FROM staff WHERE staff.store_id = 2;",
+      "SELECT category_id, COUNT(*) FROM film_category JOIN rental ON film_category.film_id = rental.inventory_id GROUP BY category_id;",
+      "UPDATE customer SET active = 1 WHERE customer_id = 3;"
+    ],
+    "weight": 2
+  },
+  {
+    "sequence": [
+      "SELECT category_id FROM category WHERE name = 'Comedy';",
+      "SELECT inventory.film_id, COUNT(*) FROM rental JOIN inventory ON rental.inventory_id = inventory.inventory_id JOIN film_category ON inventory.film_id = film_category.film_id WHERE film_category.category_id = 3 GROUP BY inventory.film_id ORDER BY COUNT(*) DESC LIMIT 5;"
+    ],
+    "weight": 1
+  },
+  {
+    "sequence": [
+      "INSERT INTO language (name) VALUES ('French');",
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 6;",
+      "SELECT * FROM language WHERE language_id = currval('language_language_id_seq')"
+    ],
+    "weight": 4
+  },
+  {
+    "sequence": [
+      "SELECT staff_id, SUM(amount) FROM payment GROUP BY staff_id;",
+      "UPDATE customer SET active = 1 WHERE customer_id = 2;"
+    ],
+    "weight": 3
+  },
+  {
+    "sequence": [
+      "UPDATE film SET rental_duration = 5 WHERE title = 'Inception';",
+      "SELECT COUNT(*) FROM film WHERE rental_rate > 6;",
+      "SELECT rental_duration FROM film WHERE title = 'Inception';"
+    ],
+    "weight": 1
+  }
+]

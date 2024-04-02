@@ -34,6 +34,18 @@ const STATEMENT_COL = 13;
 const SESSION_COL = 3;
 const TRANSACTION_COL = 9;
 
+// type Edge = {
+//   source: string; // ID počátčního vrhcolu
+//   target: string; // ID koncového vrcholu
+//   weight: number; // Váha hrany
+//   isTransaction: boolean; // Zda se jedná o transakci
+// };
+
+// type Node = {
+//   id: string; // ID vrcholu (SQL dotaz)
+//   label: string; // Popisek vrcholu
+// };
+
 function Graph() {
   const [elements, setElements] = useState<ElementDefinition[]>([]);
   const [excludedPhrases, setExcludedPhrases] = useState<string[]>([
@@ -52,19 +64,24 @@ function Graph() {
   const transformData = (data: string[][], isTransactionView: boolean) => {
     const nodes: ElementDefinition[] = [];
     const edges: ElementDefinition[] = [];
-    let highestWeight = 1;
 
+    // Filter out non-statement rows and replace values with '?'
     let logData = data
-      .filter((row) => row[STATEMENT_COL]?.includes('statement: '))
+      .filter(
+        (row) =>
+          row[STATEMENT_COL]?.includes('statement: ') ||
+          row[STATEMENT_COL]?.includes('execute')
+      )
       .map((row) => ({
-        statement: row[STATEMENT_COL].replace('statement: ', '').replace(
-          /\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g,
-          '?'
-        ),
+        statement: row[STATEMENT_COL]?.replace(
+          /.*statement: |.*execute.*?: /,
+          ''
+        ).replace(/\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g, '?'),
         session: row[SESSION_COL],
         transaction: row[TRANSACTION_COL],
       }));
 
+    // If transaction view is enabled, replace statement with 'T:statement' if it is part of a transaction.
     if (isTransactionView)
       logData = logData.map((log, index) =>
         logData.some(
@@ -87,8 +104,6 @@ function Graph() {
       if (edgeIndex !== -1) {
         edges[edgeIndex].data.weight += 1;
         edges[edgeIndex].data.label = edges[edgeIndex].data.weight.toString();
-        if (edges[edgeIndex].data.weight > highestWeight)
-          highestWeight = edges[edgeIndex].data.weight;
         return;
       }
 
@@ -106,30 +121,31 @@ function Graph() {
           },
         });
 
-      // Create node.
-      nodes.push({
-        data: {
-          id: log.statement,
-          label:
-            log.statement.length > 50
-              ? `${log.statement.slice(0, 50)} ...`
-              : log.statement,
-        },
-      });
+      // Create node if it doesn't exist.
+      if (!nodes.find((node) => node.data.id === log.statement)) {
+        nodes.push({
+          data: {
+            id: log.statement,
+            label:
+              log.statement?.length > 50
+                ? `${log.statement.slice(0, 50)} ...`
+                : log.statement,
+          },
+        });
+      }
     });
 
+    // Normalize edge weights
+    const highestWeight = Math.max(
+      ...edges.map((edge) => edge.data.weight as number)
+    );
     edges.map((edge) => {
-      edge.data.weight /= highestWeight / 2;
+      edge.data.weight = edge.data.weight / highestWeight + 0.5;
       return edge;
     });
 
     setElements([...nodes, ...edges]);
   };
-
-  const getFilteredElements = () =>
-    elements.filter((element) =>
-      excludedPhrases.every((phrase) => !element.data.label?.includes(phrase))
-    );
 
   const handleDownload = () => {
     const data = JSON.stringify(elements);
@@ -141,6 +157,7 @@ function Graph() {
     link.click();
   };
 
+  // Load data from provided file
   useEffect(() => {
     if (state.file)
       Papa.parse(state.file, {
@@ -254,7 +271,7 @@ function Graph() {
               });
             }}
             layout={{ name: settings.layout }}
-            elements={getFilteredElements()}
+            elements={elements}
             style={{
               height: state.file ? 'calc(100vh - 261px)' : 'calc(100vh - 78px)',
               width: 'calc(100vw - 32px)',
@@ -279,9 +296,10 @@ function Graph() {
                   'mid-source-arrow-color': (node) =>
                     node.data('isTransaction') ? '#7fb3dd' : '#b3b3b3',
                   'mid-source-arrow-shape': 'triangle',
-                  'arrow-scale': 0.6,
+                  'arrow-scale': 0.5,
                   width: 'data(weight)',
                   'curve-style': 'bezier',
+                  opacity: 0.7,
                 },
               },
             ]}
