@@ -12,8 +12,10 @@ import {
   Card,
   CardBody,
   Text,
-  ScaleFade,
   Divider,
+  SlideFade,
+  Spinner,
+  Center,
 } from '@chakra-ui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -23,8 +25,10 @@ import {
   SettingsIcon,
 } from '@chakra-ui/icons';
 import { ExcludedPhrases, SettingsDrawer } from 'renderer/comoponents';
-import { add } from 'ramda';
+import { add, forEach } from 'ramda';
 import fcose from 'cytoscape-fcose';
+import SyntaxHighlighter from 'react-syntax-highlighter';
+import { docco } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 import { useSettings } from '../contexts';
 
@@ -46,13 +50,26 @@ const TRANSACTION_COL = 9;
 //   label: string; // Popisek vrcholu
 // };
 
+const hasFiles = (
+  state:
+    | {
+        files: File[];
+      }
+    | {
+        exportedFile: File;
+      }
+): state is { files: File[] } => 'files' in state;
+
 function Graph() {
+  const [isLoading, setIsLoading] = useState(true);
   const [elements, setElements] = useState<ElementDefinition[]>([]);
   const [excludedPhrases, setExcludedPhrases] = useState<string[]>([
     'pg_database',
     'BEGIN',
   ]);
-  const { state } = useLocation();
+  const { state } = useLocation() as {
+    state: { files: File[] } | { exportedFile: File };
+  };
   const navigate = useNavigate();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [highlightedEdge, setHighlightedEdge] = useState<
@@ -61,9 +78,14 @@ function Graph() {
   const { settings } = useSettings();
   const [key, forceRefresh] = useReducer(add(1), 0);
 
-  const transformData = (data: string[][], isTransactionView: boolean) => {
-    const nodes: ElementDefinition[] = [];
-    const edges: ElementDefinition[] = [];
+  const transformData = (
+    data: string[][],
+    isTransactionView: boolean,
+    threshold: number,
+    multiplier: number
+  ) => {
+    let nodes: ElementDefinition[] = [];
+    let edges: ElementDefinition[] = [];
 
     // Filter out non-statement rows and replace values with '?'
     let logData = data
@@ -79,7 +101,8 @@ function Graph() {
         ).replace(/\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g, '?'),
         session: row[SESSION_COL],
         transaction: row[TRANSACTION_COL],
-      }));
+      }))
+      .sort((a, b) => a.session.localeCompare(b.session));
 
     // If transaction view is enabled, replace statement with 'T:statement' if it is part of a transaction.
     if (isTransactionView)
@@ -121,30 +144,59 @@ function Graph() {
           },
         });
 
-      // Create node if it doesn't exist.
+      // Create node if it doesn't exist. If it does, increment weight.
       if (!nodes.find((node) => node.data.id === log.statement)) {
         nodes.push({
           data: {
             id: log.statement,
+            weight: 1,
             label:
               log.statement?.length > 50
                 ? `${log.statement.slice(0, 50)} ...`
                 : log.statement,
           },
         });
+      } else {
+        const nodeIndex = nodes.findIndex(
+          (node) => node.data.id === log.statement
+        );
+        nodes[nodeIndex].data.weight += 1;
       }
     });
+
+    // Filter out edges with weight lower than threshold
+    if (threshold)
+      edges = edges.filter((edge) => edge.data.weight >= threshold);
+
+    // Filter out nodes that are not connected to any edge
+    nodes = nodes.filter((node) =>
+      edges.some(
+        (edge) =>
+          edge.data.source === node.data.id || edge.data.target === node.data.id
+      )
+    );
 
     // Normalize edge weights
     const highestWeight = Math.max(
       ...edges.map((edge) => edge.data.weight as number)
     );
-    edges.map((edge) => {
+    edges.forEach((edge) => {
       edge.data.weight = edge.data.weight / highestWeight + 0.5;
       return edge;
     });
 
+    // Normalize node weights
+    const highestNodeWeight = Math.max(
+      ...nodes.map((node) => node.data.weight as number)
+    );
+    nodes.forEach((node) => {
+      node.data.weight =
+        (node.data.weight / highestNodeWeight) * multiplier + 10;
+      return node;
+    });
+
     setElements([...nodes, ...edges]);
+    setIsLoading(false);
   };
 
   const handleDownload = () => {
@@ -159,42 +211,67 @@ function Graph() {
 
   // Load data from provided file
   useEffect(() => {
-    if (state.file)
-      Papa.parse(state.file, {
-        complete: (results: ParseResult<string[]>) => {
+    if ('files' in state) {
+      Promise.all(
+        state.files.map(
+          (file) =>
+            new Promise<ParseResult<string[]>>((resolve, reject) =>
+              Papa.parse(file, {
+                complete: resolve, // Resolve each promise
+                error: reject,
+              })
+            )
+        )
+      )
+        .then((results) => {
+          const allData = results.flatMap((result) => result.data);
+
           transformData(
-            results.data.filter((row) =>
+            allData.filter((row) =>
               excludedPhrases.every(
                 (phrase) => !row[STATEMENT_COL]?.includes(phrase)
               )
             ),
-            settings.isTransactionView
+            settings.isTransactionView,
+            settings.threshold,
+            settings.nodeMultiplier
           );
-          forceRefresh();
-        },
-      });
-    else {
+
+          return forceRefresh();
+        })
+        .catch((err) => console.error(err));
+    } else {
       const fileReader = new FileReader();
       fileReader.readAsText(state.exportedFile);
       fileReader.onload = (event) =>
         typeof event?.target?.result === 'string' &&
         setElements(JSON.parse(event?.target?.result));
     }
-  }, [excludedPhrases, settings.isTransactionView, state]);
+  }, [
+    excludedPhrases,
+    settings.isTransactionView,
+    settings.nodeMultiplier,
+    settings.threshold,
+    state,
+  ]);
 
   return (
-    <VStack padding={4} spacing={4} align="flex-start">
+    <VStack height="100vh" padding={4} spacing={4} align="flex-start">
       <HStack justifyContent="space-between" width="100%">
         <HStack>
-          <Button
-            size="sm"
-            onClick={() => navigate('/')}
-            leftIcon={<ArrowBackIcon />}
-          >
-            Go back
-          </Button>
-          <Heading size="md">
-            {state.file?.name ?? state.exportedFile.name}
+          <Box>
+            <Button
+              size="sm"
+              onClick={() => navigate('/')}
+              leftIcon={<ArrowBackIcon />}
+            >
+              Go back
+            </Button>
+          </Box>
+          <Heading size="md" noOfLines={1}>
+            {hasFiles(state)
+              ? state.files.map((file) => file.name).join(', ')
+              : state.exportedFile.name}
           </Heading>
         </HStack>
         <HStack>
@@ -202,7 +279,7 @@ function Graph() {
             size="sm"
             onClick={handleDownload}
             leftIcon={<DownloadIcon />}
-            isDisabled={!state.file}
+            isDisabled={!hasFiles(state)}
           >
             Export graph
           </Button>
@@ -214,36 +291,45 @@ function Graph() {
           </Button>
         </HStack>
       </HStack>
-      {state.file && (
+      {hasFiles(state) && (
         <ExcludedPhrases
           excludedPhrases={excludedPhrases}
           onExcludePhrasesChange={setExcludedPhrases}
         />
       )}
-      <Box overflow="hidden">
-        <ScaleFade in={!!highlightedEdge}>
+      <Box height="full" overflow="hidden">
+        <SlideFade in={!!highlightedEdge}>
           {highlightedEdge && (
-            <Box
-              position="absolute"
-              zIndex={10}
-              backgroundColor="white"
-              marginRight={4}
-            >
+            <Box position="absolute" zIndex={10} marginRight={4}>
               <Card backgroundColor="gray.200">
                 <CardBody>
-                  <VStack spacing={1} align="start">
-                    <HStack>
-                      <Heading size="xs">Source:</Heading>
-                      <Heading size="xs" fontWeight="normal">
-                        {highlightedEdge.target}
-                      </Heading>
-                    </HStack>
-                    <HStack>
-                      <Heading size="xs">Target:</Heading>
-                      <Heading size="xs" fontWeight="normal">
-                        {highlightedEdge.source}
-                      </Heading>
-                    </HStack>
+                  <VStack spacing={2} align="start">
+                    <Heading size="xs">Source</Heading>
+                    <SyntaxHighlighter
+                      language="sql"
+                      style={docco}
+                      wrapLongLines
+                      customStyle={{
+                        fontSize: 14,
+                        maxHeight: 116,
+                        width: '100%',
+                      }}
+                    >
+                      {highlightedEdge.target}
+                    </SyntaxHighlighter>
+                    <Heading size="xs">Target</Heading>
+                    <SyntaxHighlighter
+                      language="sql"
+                      style={docco}
+                      wrapLongLines
+                      customStyle={{
+                        fontSize: 14,
+                        maxHeight: 116,
+                        width: '100%',
+                      }}
+                    >
+                      {highlightedEdge.source}
+                    </SyntaxHighlighter>
                     <Divider />
                     <Text fontSize="sm">
                       This sequence occured {highlightedEdge.label} times
@@ -258,8 +344,8 @@ function Graph() {
               </Card>
             </Box>
           )}
-        </ScaleFade>
-        {elements.length && (
+        </SlideFade>
+        {elements.length ? (
           <CytoscapeComponent
             key={key}
             cy={(cy) => {
@@ -273,7 +359,9 @@ function Graph() {
             layout={{ name: settings.layout }}
             elements={elements}
             style={{
-              height: state.file ? 'calc(100vh - 261px)' : 'calc(100vh - 78px)',
+              height: hasFiles(state)
+                ? 'calc(100vh - 261px)'
+                : 'calc(100vh - 78px)',
               width: 'calc(100vw - 32px)',
             }}
             stylesheet={[
@@ -283,8 +371,8 @@ function Graph() {
                   label: 'data(label)',
                   backgroundColor: '#4299E1',
                   'font-size': settings.fontSize,
-                  width: 10,
-                  height: 10,
+                  width: 'data(weight)',
+                  height: 'data(weight)',
                   'font-weight': 'bold',
                 },
               },
@@ -304,10 +392,18 @@ function Graph() {
               },
             ]}
           />
+        ) : (
+          <Center height="full" width="100vw">
+            {isLoading ? (
+              <Spinner size="lg" color="blue.500" />
+            ) : (
+              <p>No data</p>
+            )}
+          </Center>
         )}
       </Box>
       <SettingsDrawer
-        isTransactionViewDisabled={!!state.exportedFile}
+        isReadOnly={!hasFiles(state)}
         isOpen={isOpen}
         onClose={onClose}
       />

@@ -18,9 +18,7 @@ import postgres from '../../../assets/postgres.png';
 function Home() {
   const navigate = useNavigate();
   const handleFileChange = (files: File[]) => {
-    const file = files[0];
-
-    navigate('/graph', { state: { file } });
+    navigate('/graph', { state: { files } });
   };
 
   const handleExportedFileChange = (files: File[]) => {
@@ -34,9 +32,11 @@ function Home() {
       <VStack padding={4} spacing={4} align="stretch">
         <HStack>
           <Image height={8} src={postgres} />
-          <Heading size="lg">PostgreSQL Log Analyzer</Heading>
+          <Heading size="lg" color="white">
+            PostgreSQL Log Analyzer
+          </Heading>
         </HStack>
-        <Card>
+        <Card shadow="2xl">
           <CardBody>
             <VStack spacing={2} align="flex-start">
               <Text>Generate graph from a log file</Text>
@@ -45,6 +45,7 @@ function Home() {
                 onFileChange={handleFileChange}
                 hideClearButton
                 accept=".csv"
+                multipleFiles
               />
               <Text fontSize="xs" textColor="GrayText">
                 CSV files are supported

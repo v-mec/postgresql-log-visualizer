@@ -1,15 +1,19 @@
 import { createContext, ReactNode, useContext, useState } from 'react';
 
-type Settings = {
+export type Settings = {
   fontSize: number;
   isTransactionView: boolean;
   layout: string;
+  threshold: number;
+  nodeMultiplier: number;
 };
 
 const defaultSettings: Settings = {
   fontSize: 5,
   isTransactionView: false,
   layout: 'cose',
+  threshold: 1,
+  nodeMultiplier: 20,
 };
 
 type SettingsContextType = {
