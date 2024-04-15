@@ -12,7 +12,6 @@ import {
   Card,
   CardBody,
   Text,
-  Divider,
   SlideFade,
   Spinner,
   Center,
@@ -24,12 +23,15 @@ import {
   RepeatIcon,
   SettingsIcon,
 } from '@chakra-ui/icons';
-import { ExcludedPhrases, SettingsDrawer } from 'renderer/comoponents';
-import { add, forEach } from 'ramda';
+import {
+  ExcludedPhrases,
+  HelpTooltip,
+  SequenceDetail,
+  SettingsDrawer,
+} from 'renderer/comoponents';
+import { getEdgeColor, handleDownload, hasFiles } from 'renderer/utils';
+import { add } from 'ramda';
 import fcose from 'cytoscape-fcose';
-import SyntaxHighlighter from 'react-syntax-highlighter';
-import { docco } from 'react-syntax-highlighter/dist/esm/styles/hljs';
-
 import { useSettings } from '../contexts';
 
 Cytoscape.use(fcose);
@@ -38,28 +40,6 @@ const STATEMENT_COL = 13;
 const SESSION_COL = 3;
 const TRANSACTION_COL = 9;
 
-// type Edge = {
-//   source: string; // ID počátčního vrhcolu
-//   target: string; // ID koncového vrcholu
-//   weight: number; // Váha hrany
-//   isTransaction: boolean; // Zda se jedná o transakci
-// };
-
-// type Node = {
-//   id: string; // ID vrcholu (SQL dotaz)
-//   label: string; // Popisek vrcholu
-// };
-
-const hasFiles = (
-  state:
-    | {
-        files: File[];
-      }
-    | {
-        exportedFile: File;
-      }
-): state is { files: File[] } => 'files' in state;
-
 function Graph() {
   const [isLoading, setIsLoading] = useState(true);
   const [elements, setElements] = useState<ElementDefinition[]>([]);
@@ -67,16 +47,20 @@ function Graph() {
     'pg_database',
     'BEGIN',
   ]);
+  const [sequences, setSequences] = useState<string[][]>([]);
+  const [sequenceIndex, setSequenceIndex] = useState<number | null>(null);
+  const [highlightedEdge, setHighlightedEdge] = useState<
+    (EdgeDataDefinition & { label: string; isTransaction: boolean }) | undefined
+  >();
+
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [key, forceRefresh] = useReducer(add(1), 0);
+  const { settings } = useSettings();
+
   const { state } = useLocation() as {
     state: { files: File[] } | { exportedFile: File };
   };
   const navigate = useNavigate();
-  const { isOpen, onOpen, onClose } = useDisclosure();
-  const [highlightedEdge, setHighlightedEdge] = useState<
-    (EdgeDataDefinition & { label: string }) | undefined
-  >();
-  const { settings } = useSettings();
-  const [key, forceRefresh] = useReducer(add(1), 0);
 
   const transformData = (
     data: string[][],
@@ -116,6 +100,27 @@ function Graph() {
       );
 
     logData.forEach((log, index) => {
+      // Find node if it already exists.
+      const nodeIndex = nodes.findIndex(
+        (node) => node.data.id === log.statement
+      );
+
+      // Create node if it doesn't exists, otherwise increment weight.
+      if (nodeIndex === -1) {
+        nodes.push({
+          data: {
+            id: log.statement,
+            weight: 1,
+            label:
+              log.statement?.length > 50
+                ? `${log.statement.slice(0, 50)} ...`
+                : log.statement,
+          },
+        });
+      } else {
+        nodes[nodeIndex].data.weight += 1;
+      }
+
       // Find edge if it already exists.
       const edgeIndex = edges.findIndex(
         (edge) =>
@@ -123,7 +128,7 @@ function Graph() {
           edge.data.target === logData[index - 1]?.statement
       );
 
-      // If edge exists, increment weight. If weight is higher than highest weight, update highest weight.
+      // If edge exists, increment weight.
       if (edgeIndex !== -1) {
         edges[edgeIndex].data.weight += 1;
         edges[edgeIndex].data.label = edges[edgeIndex].data.weight.toString();
@@ -143,25 +148,6 @@ function Graph() {
               log.transaction === logData[index - 1]?.transaction,
           },
         });
-
-      // Create node if it doesn't exist. If it does, increment weight.
-      if (!nodes.find((node) => node.data.id === log.statement)) {
-        nodes.push({
-          data: {
-            id: log.statement,
-            weight: 1,
-            label:
-              log.statement?.length > 50
-                ? `${log.statement.slice(0, 50)} ...`
-                : log.statement,
-          },
-        });
-      } else {
-        const nodeIndex = nodes.findIndex(
-          (node) => node.data.id === log.statement
-        );
-        nodes[nodeIndex].data.weight += 1;
-      }
     });
 
     // Filter out edges with weight lower than threshold
@@ -195,18 +181,26 @@ function Graph() {
       return node;
     });
 
+    const allSequences = Object.values(
+      logData.reduce((acc, curr) => {
+        if (acc[curr.session]) {
+          acc[curr.session].push(curr.statement);
+        } else {
+          acc[curr.session] = [curr.statement];
+        }
+
+        return acc;
+      }, {} as Record<string, string[]>)
+    );
+
+    const uniqueSequences = allSequences.filter(
+      (sequence, index, self) =>
+        self.findIndex((s) => s.toString() === sequence.toString()) === index
+    );
+
+    setSequences(uniqueSequences);
     setElements([...nodes, ...edges]);
     setIsLoading(false);
-  };
-
-  const handleDownload = () => {
-    const data = JSON.stringify(elements);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.download = 'graph.json';
-    link.href = url;
-    link.click();
   };
 
   // Load data from provided file
@@ -277,7 +271,7 @@ function Graph() {
         <HStack>
           <Button
             size="sm"
-            onClick={handleDownload}
+            onClick={() => handleDownload(elements)}
             leftIcon={<DownloadIcon />}
             isDisabled={!hasFiles(state)}
           >
@@ -298,62 +292,41 @@ function Graph() {
         />
       )}
       <Box height="full" overflow="hidden">
+        {sequenceIndex !== null && sequenceIndex >= 0 && (
+          <Box pos="absolute" left={4} bottom={4} zIndex={10}>
+            <Card backgroundColor="gray.200">
+              <CardBody>
+                <Text fontSize="md" fontWeight="semibold">
+                  {`Session ${sequenceIndex + 1} / ${sequences.length}`}
+                </Text>
+              </CardBody>
+            </Card>
+          </Box>
+        )}
         <SlideFade in={!!highlightedEdge}>
-          {highlightedEdge && (
-            <Box position="absolute" zIndex={10} marginRight={4}>
-              <Card backgroundColor="gray.200">
-                <CardBody>
-                  <VStack spacing={2} align="start">
-                    <Heading size="xs">Source</Heading>
-                    <SyntaxHighlighter
-                      language="sql"
-                      style={docco}
-                      wrapLongLines
-                      customStyle={{
-                        fontSize: 14,
-                        maxHeight: 116,
-                        width: '100%',
-                      }}
-                    >
-                      {highlightedEdge.target}
-                    </SyntaxHighlighter>
-                    <Heading size="xs">Target</Heading>
-                    <SyntaxHighlighter
-                      language="sql"
-                      style={docco}
-                      wrapLongLines
-                      customStyle={{
-                        fontSize: 14,
-                        maxHeight: 116,
-                        width: '100%',
-                      }}
-                    >
-                      {highlightedEdge.source}
-                    </SyntaxHighlighter>
-                    <Divider />
-                    <Text fontSize="sm">
-                      This sequence occured {highlightedEdge.label} times
-                    </Text>
-                    {highlightedEdge.isTransaction && (
-                      <Text fontSize="sm" color="blue.600">
-                        This sequence occured in a transaction
-                      </Text>
-                    )}
-                  </VStack>
-                </CardBody>
-              </Card>
-            </Box>
-          )}
+          {highlightedEdge && <SequenceDetail edgeData={highlightedEdge} />}
         </SlideFade>
+        <HelpTooltip />
         {elements.length ? (
           <CytoscapeComponent
             key={key}
             cy={(cy) => {
-              cy.on('tap', 'edge', (event) => {
+              cy.on('click', 'edge', (event) => {
                 setHighlightedEdge(event.target.data());
               });
-              cy.on('tap', (event) => {
-                if (event.target === cy) setHighlightedEdge(undefined);
+              cy.on('click', (event) => {
+                if (event.target === cy) {
+                  setHighlightedEdge(undefined);
+                  setSequenceIndex(null);
+                }
+              });
+              cy.on('click', 'node', (event) => {
+                const id = event.target.id();
+                const index = sequences.findIndex(
+                  (sequence, _index) =>
+                    sequence.includes(id) && _index > (sequenceIndex ?? -1)
+                );
+                setSequenceIndex(index);
               });
             }}
             layout={{ name: settings.layout }}
@@ -379,10 +352,22 @@ function Graph() {
               {
                 selector: 'edge',
                 style: {
-                  'line-color': (node) =>
-                    node.data('isTransaction') ? '#7fb3dd' : '#b3b3b3',
-                  'mid-source-arrow-color': (node) =>
-                    node.data('isTransaction') ? '#7fb3dd' : '#b3b3b3',
+                  'line-color': (edge) =>
+                    getEdgeColor(
+                      edge,
+                      sequenceIndex !== null && sequenceIndex >= 0
+                        ? sequences[sequenceIndex]
+                        : null,
+                      highlightedEdge?.id
+                    ),
+                  'mid-source-arrow-color': (edge) =>
+                    getEdgeColor(
+                      edge,
+                      sequenceIndex !== null && sequenceIndex >= 0
+                        ? sequences[sequenceIndex]
+                        : null,
+                      highlightedEdge?.id
+                    ),
                   'mid-source-arrow-shape': 'triangle',
                   'arrow-scale': 0.5,
                   width: 'data(weight)',
@@ -397,7 +382,12 @@ function Graph() {
             {isLoading ? (
               <Spinner size="lg" color="blue.500" />
             ) : (
-              <p>No data</p>
+              <VStack>
+                <Text fontWeight="bold">No data</Text>
+                <Text color="GrayText">
+                  Adjust graph settings or load another log file
+                </Text>
+              </VStack>
             )}
           </Center>
         )}

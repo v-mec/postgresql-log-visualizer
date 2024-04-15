@@ -18,6 +18,7 @@ import {
   Select,
   Input,
   FormHelperText,
+  Button,
 } from '@chakra-ui/react';
 import { useSettings } from '../contexts';
 
@@ -39,72 +40,85 @@ function SettingsDrawer(props: SettingsDrawerProps) {
         <DrawerHeader>Graph settings</DrawerHeader>
 
         <DrawerBody>
-          <VStack spacing={8} align="start">
-            <FormControl>
-              <FormLabel>Layout algorithm</FormLabel>
-              <Select
-                value={settings.layout}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = event.target as HTMLFormElement;
+              const formData = new FormData(form);
+              const threshold = Number(formData.get('threshold'));
+              updateSettings({ ...settings, threshold });
+            }}
+          >
+            <VStack spacing={8} align="start">
+              <FormControl>
+                <FormLabel>Layout algorithm</FormLabel>
+                <Select
+                  value={settings.layout}
+                  onChange={(event) =>
+                    updateSettings({ ...settings, layout: event.target.value })
+                  }
+                >
+                  <option value="cose">CoSE</option>
+                  <option value="fcose">fCoSE</option>
+                </Select>
+              </FormControl>
+              <Checkbox
+                isDisabled={isReadOnly}
+                isChecked={settings.isTransactionView}
                 onChange={(event) =>
-                  updateSettings({ ...settings, layout: event.target.value })
+                  updateSettings({
+                    ...settings,
+                    isTransactionView: event.target.checked,
+                  })
                 }
               >
-                <option value="cose">CoSE</option>
-                <option value="fcose">fCoSE</option>
-              </Select>
-            </FormControl>
-            <FormControl>
-              <FormLabel>Label font size</FormLabel>
-              <HStack spacing={4}>
-                <Slider
-                  min={0}
-                  max={10}
-                  value={settings.fontSize}
-                  onChange={(value) =>
-                    updateSettings({ ...settings, fontSize: value })
-                  }
-                >
-                  <SliderTrack>
-                    <SliderFilledTrack />
-                  </SliderTrack>
-                  <SliderThumb />
-                </Slider>
-                <Text width={10}>{settings.fontSize}</Text>
-              </HStack>
-            </FormControl>
-            <FormControl>
-              <FormLabel>Node size multiplier</FormLabel>
-              <HStack spacing={4}>
-                <Slider
-                  isDisabled={isReadOnly}
-                  min={0}
-                  max={50}
-                  value={settings.nodeMultiplier}
-                  step={10}
-                  onChange={(value) =>
-                    updateSettings({ ...settings, nodeMultiplier: value })
-                  }
-                >
-                  <SliderTrack>
-                    <SliderFilledTrack />
-                  </SliderTrack>
-                  <SliderThumb />
-                </Slider>
-                <Text width={10}>{settings.nodeMultiplier}x</Text>
-              </HStack>
-              <FormHelperText>
-                Sets how much is node size affected by the number of
-                occurrences.
-              </FormHelperText>
-            </FormControl>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                const form = event.target as HTMLFormElement;
-                const formData = new FormData(form);
-                const threshold = Number(formData.get('threshold'));
-                updateSettings({ ...settings, threshold });
-              }}
-            >
+                Transaction view
+              </Checkbox>
+              <FormControl>
+                <FormLabel>Label font size</FormLabel>
+                <HStack spacing={4}>
+                  <Slider
+                    min={0}
+                    max={10}
+                    value={settings.fontSize}
+                    onChange={(value) =>
+                      updateSettings({ ...settings, fontSize: value })
+                    }
+                  >
+                    <SliderTrack>
+                      <SliderFilledTrack />
+                    </SliderTrack>
+                    <SliderThumb />
+                  </Slider>
+                  <Text width={10}>{settings.fontSize}</Text>
+                </HStack>
+              </FormControl>
+              <FormControl>
+                <FormLabel>Node size multiplier</FormLabel>
+                <HStack spacing={4}>
+                  <Slider
+                    isDisabled={isReadOnly}
+                    min={0}
+                    max={50}
+                    value={settings.nodeMultiplier}
+                    step={10}
+                    onChange={(value) =>
+                      updateSettings({ ...settings, nodeMultiplier: value })
+                    }
+                  >
+                    <SliderTrack>
+                      <SliderFilledTrack />
+                    </SliderTrack>
+                    <SliderThumb />
+                  </Slider>
+                  <Text width={10}>{settings.nodeMultiplier}x</Text>
+                </HStack>
+                <FormHelperText>
+                  Sets how much is node size affected by the number of
+                  occurrences.
+                </FormHelperText>
+              </FormControl>
+
               <FormControl>
                 <FormLabel>Sequence threshold</FormLabel>
                 <Input
@@ -118,20 +132,11 @@ function SettingsDrawer(props: SettingsDrawerProps) {
                   ignored.
                 </FormHelperText>
               </FormControl>
-            </form>
-            <Checkbox
-              isDisabled={isReadOnly}
-              isChecked={settings.isTransactionView}
-              onChange={(event) =>
-                updateSettings({
-                  ...settings,
-                  isTransactionView: event.target.checked,
-                })
-              }
-            >
-              Transaction view
-            </Checkbox>
-          </VStack>
+              <Button type="submit" onClick={onClose}>
+                Save
+              </Button>
+            </VStack>
+          </form>
         </DrawerBody>
       </DrawerContent>
     </Drawer>
