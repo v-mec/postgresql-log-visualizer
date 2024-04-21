@@ -11,7 +11,7 @@ export type Settings = {
 const defaultSettings: Settings = {
   fontSize: 5,
   isTransactionView: false,
-  layout: 'cose',
+  layout: 'fcose',
   threshold: 1,
   nodeMultiplier: 20,
 };

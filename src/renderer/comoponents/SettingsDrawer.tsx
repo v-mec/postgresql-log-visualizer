@@ -58,7 +58,7 @@ function SettingsDrawer(props: SettingsDrawerProps) {
                     updateSettings({ ...settings, layout: event.target.value })
                   }
                 >
-                  <option value="cose">CoSE</option>
+                  <option value="cose">CoSE (slower)</option>
                   <option value="fcose">fCoSE</option>
                 </Select>
               </FormControl>

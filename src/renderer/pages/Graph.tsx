@@ -1,7 +1,11 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import Papa, { ParseResult } from 'papaparse';
 import CytoscapeComponent from 'react-cytoscapejs';
-import Cytoscape, { EdgeDataDefinition, ElementDefinition } from 'cytoscape';
+import Cytoscape, {
+  CoseLayoutOptions,
+  EdgeDataDefinition,
+  ElementDefinition,
+} from 'cytoscape';
 import {
   Button,
   VStack,
@@ -15,6 +19,7 @@ import {
   SlideFade,
   Spinner,
   Center,
+  useToast,
 } from '@chakra-ui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -31,7 +36,7 @@ import {
 } from 'renderer/comoponents';
 import { getEdgeColor, handleDownload, hasFiles } from 'renderer/utils';
 import { add } from 'ramda';
-import fcose from 'cytoscape-fcose';
+import fcose, { FcoseLayoutOptions } from 'cytoscape-fcose';
 import { useSettings } from '../contexts';
 
 Cytoscape.use(fcose);
@@ -52,6 +57,7 @@ function Graph() {
   const [highlightedEdge, setHighlightedEdge] = useState<
     (EdgeDataDefinition & { label: string; isTransaction: boolean }) | undefined
   >();
+  const [csvData, setCsvData] = useState<string[][]>([]);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [key, forceRefresh] = useReducer(add(1), 0);
@@ -61,147 +67,166 @@ function Graph() {
     state: { files: File[] } | { exportedFile: File };
   };
   const navigate = useNavigate();
+  const toast = useToast();
 
-  const transformData = (
-    data: string[][],
-    isTransactionView: boolean,
-    threshold: number,
-    multiplier: number
-  ) => {
-    let nodes: ElementDefinition[] = [];
-    let edges: ElementDefinition[] = [];
+  const transformData = useCallback(
+    (
+      data: string[][],
+      isTransactionView: boolean,
+      threshold: number,
+      multiplier: number
+    ) => {
+      let nodes: ElementDefinition[] = [];
+      let edges: ElementDefinition[] = [];
 
-    // Filter out non-statement rows and replace values with '?'
-    let logData = data
-      .filter(
-        (row) =>
-          row[STATEMENT_COL]?.includes('statement: ') ||
-          row[STATEMENT_COL]?.includes('execute')
-      )
-      .map((row) => ({
-        statement: row[STATEMENT_COL]?.replace(
-          /.*statement: |.*execute.*?: /,
-          ''
-        ).replace(/\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g, '?'),
-        session: row[SESSION_COL],
-        transaction: row[TRANSACTION_COL],
-      }))
-      .sort((a, b) => a.session.localeCompare(b.session));
-
-    // If transaction view is enabled, replace statement with 'T:statement' if it is part of a transaction.
-    if (isTransactionView)
-      logData = logData.map((log, index) =>
-        logData.some(
-          (_log, _index) =>
-            log.transaction === _log.transaction && index !== _index
+      // Filter out non-statement rows and replace values with '?'
+      let logData = data
+        .filter(
+          (row) =>
+            row[STATEMENT_COL]?.includes('statement: ') ||
+            row[STATEMENT_COL]?.includes('execute')
         )
-          ? { ...log, statement: `T:${log.statement}` }
-          : log
-      );
+        .map((row) => ({
+          statement: row[STATEMENT_COL]?.replace(
+            /.*statement: |.*execute.*?: /,
+            ''
+          ).replace(/\( \$\d+ \)|'(.*?)'|(?<= |=|\(|,)\d+/g, '?'),
+          session: row[SESSION_COL],
+          transaction: row[TRANSACTION_COL],
+        }))
+        .sort((a, b) => a.session.localeCompare(b.session));
 
-    logData.forEach((log, index) => {
-      // Find node if it already exists.
-      const nodeIndex = nodes.findIndex(
-        (node) => node.data.id === log.statement
-      );
+      // If transaction view is enabled, replace statement with 'T:statement' if it is part of a transaction.
+      if (isTransactionView)
+        logData = logData.map((log, index) =>
+          logData.some(
+            (_log, _index) =>
+              log.transaction === _log.transaction && index !== _index
+          )
+            ? { ...log, statement: `T:${log.statement}` }
+            : log
+        );
 
-      // Create node if it doesn't exists, otherwise increment weight.
-      if (nodeIndex === -1) {
-        nodes.push({
-          data: {
-            id: log.statement,
-            weight: 1,
-            label:
-              log.statement?.length > 50
-                ? `${log.statement.slice(0, 50)} ...`
-                : log.statement,
-          },
-        });
-      } else {
-        nodes[nodeIndex].data.weight += 1;
-      }
+      logData.forEach((log, index) => {
+        // Find node if it already exists.
+        const nodeIndex = nodes.findIndex(
+          (node) => node.data.id === log.statement
+        );
 
-      // Find edge if it already exists.
-      const edgeIndex = edges.findIndex(
-        (edge) =>
-          edge.data.source === log.statement &&
-          edge.data.target === logData[index - 1]?.statement
-      );
-
-      // If edge exists, increment weight.
-      if (edgeIndex !== -1) {
-        edges[edgeIndex].data.weight += 1;
-        edges[edgeIndex].data.label = edges[edgeIndex].data.weight.toString();
-        return;
-      }
-
-      // If the previous statement was from the same session, create an edge.
-      if (log.session === logData[index - 1]?.session)
-        edges.push({
-          data: {
-            source: log.statement,
-            target: logData[index - 1]?.statement,
-            weight: 1,
-            label: '1',
-            isTransaction:
-              isTransactionView &&
-              log.transaction === logData[index - 1]?.transaction,
-          },
-        });
-    });
-
-    // Filter out edges with weight lower than threshold
-    if (threshold)
-      edges = edges.filter((edge) => edge.data.weight >= threshold);
-
-    // Filter out nodes that are not connected to any edge
-    nodes = nodes.filter((node) =>
-      edges.some(
-        (edge) =>
-          edge.data.source === node.data.id || edge.data.target === node.data.id
-      )
-    );
-
-    // Normalize edge weights
-    const highestWeight = Math.max(
-      ...edges.map((edge) => edge.data.weight as number)
-    );
-    edges.forEach((edge) => {
-      edge.data.weight = edge.data.weight / highestWeight + 0.5;
-      return edge;
-    });
-
-    // Normalize node weights
-    const highestNodeWeight = Math.max(
-      ...nodes.map((node) => node.data.weight as number)
-    );
-    nodes.forEach((node) => {
-      node.data.weight =
-        (node.data.weight / highestNodeWeight) * multiplier + 10;
-      return node;
-    });
-
-    const allSequences = Object.values(
-      logData.reduce((acc, curr) => {
-        if (acc[curr.session]) {
-          acc[curr.session].push(curr.statement);
+        // Create node if it doesn't exists, otherwise increment weight.
+        if (nodeIndex === -1) {
+          nodes.push({
+            data: {
+              id: log.statement,
+              weight: 1,
+              label:
+                log.statement?.length > 50
+                  ? `${log.statement.slice(0, 50)} ...`
+                  : log.statement,
+            },
+          });
         } else {
-          acc[curr.session] = [curr.statement];
+          nodes[nodeIndex].data.weight += 1;
         }
 
-        return acc;
-      }, {} as Record<string, string[]>)
-    );
+        // Find edge if it already exists.
+        const edgeIndex = edges.findIndex(
+          (edge) =>
+            edge.data.source === log.statement &&
+            edge.data.target === logData[index - 1]?.statement
+        );
 
-    const uniqueSequences = allSequences.filter(
-      (sequence, index, self) =>
-        self.findIndex((s) => s.toString() === sequence.toString()) === index
-    );
+        // If edge exists, increment weight.
+        if (edgeIndex !== -1) {
+          edges[edgeIndex].data.weight += 1;
+          edges[edgeIndex].data.label = edges[edgeIndex].data.weight.toString();
+          return;
+        }
 
-    setSequences(uniqueSequences);
-    setElements([...nodes, ...edges]);
-    setIsLoading(false);
-  };
+        // If the previous statement was from the same session, create an edge.
+        if (log.session === logData[index - 1]?.session)
+          edges.push({
+            data: {
+              source: log.statement,
+              target: logData[index - 1]?.statement,
+              weight: 1,
+              label: '1',
+              isTransaction:
+                isTransactionView &&
+                log.transaction === logData[index - 1]?.transaction,
+            },
+          });
+      });
+
+      // Filter out edges with weight lower than threshold
+      if (threshold)
+        edges = edges.filter((edge) => edge.data.weight >= threshold);
+
+      if (edges.length > 500) {
+        toast({
+          duration: 10000,
+          isClosable: true,
+          status: 'info',
+          title: 'Too many edges',
+          description: 'Only 500 most weighted edges are displayed.',
+        });
+      }
+
+      // Filter out 500 edges with most weight
+      edges = edges.sort((a, b) => b.data.weight - a.data.weight).slice(0, 500);
+
+      // Filter out nodes that are not connected to any edge
+      nodes = nodes.filter((node) =>
+        edges.some(
+          (edge) =>
+            edge.data.source === node.data.id ||
+            edge.data.target === node.data.id
+        )
+      );
+
+      // Normalize edge weights
+      const highestWeight = Math.max(
+        ...edges.map((edge) => edge.data.weight as number)
+      );
+      edges.forEach((edge) => {
+        edge.data.weight = edge.data.weight / highestWeight + 0.5;
+        return edge;
+      });
+
+      // Normalize node weights
+      const highestNodeWeight = Math.max(
+        ...nodes.map((node) => node.data.weight as number)
+      );
+      nodes.forEach((node) => {
+        node.data.weight =
+          (node.data.weight / highestNodeWeight) * multiplier + 10;
+        return node;
+      });
+
+      const allSequences = Object.values(
+        logData.reduce((acc, curr) => {
+          if (acc[curr.session]) {
+            acc[curr.session].push(curr.statement);
+          } else {
+            acc[curr.session] = [curr.statement];
+          }
+
+          return acc;
+        }, {} as Record<string, string[]>)
+      );
+
+      const uniqueSequences = allSequences.filter(
+        (sequence, index, self) =>
+          self.findIndex((s) => s.toString() === sequence.toString()) === index
+      );
+
+      setSequences(uniqueSequences);
+      setElements([...nodes, ...edges]);
+      setIsLoading(false);
+      forceRefresh();
+    },
+    [toast]
+  );
 
   // Load data from provided file
   useEffect(() => {
@@ -217,22 +242,7 @@ function Graph() {
             )
         )
       )
-        .then((results) => {
-          const allData = results.flatMap((result) => result.data);
-
-          transformData(
-            allData.filter((row) =>
-              excludedPhrases.every(
-                (phrase) => !row[STATEMENT_COL]?.includes(phrase)
-              )
-            ),
-            settings.isTransactionView,
-            settings.threshold,
-            settings.nodeMultiplier
-          );
-
-          return forceRefresh();
-        })
+        .then((results) => setCsvData(results.flatMap((result) => result.data)))
         .catch((err) => console.error(err));
     } else {
       const fileReader = new FileReader();
@@ -241,12 +251,28 @@ function Graph() {
         typeof event?.target?.result === 'string' &&
         setElements(JSON.parse(event?.target?.result));
     }
+  }, [state]);
+
+  useEffect(() => {
+    if (csvData.length) {
+      transformData(
+        csvData.filter((row) =>
+          excludedPhrases.every(
+            (phrase) => !row[STATEMENT_COL]?.includes(phrase)
+          )
+        ),
+        settings.isTransactionView,
+        settings.threshold,
+        settings.nodeMultiplier
+      );
+    }
   }, [
+    csvData,
     excludedPhrases,
     settings.isTransactionView,
     settings.nodeMultiplier,
     settings.threshold,
-    state,
+    transformData,
   ]);
 
   return (
@@ -329,7 +355,11 @@ function Graph() {
                 setSequenceIndex(index);
               });
             }}
-            layout={{ name: settings.layout }}
+            layout={
+              { name: settings.layout, animate: false } as
+                | FcoseLayoutOptions
+                | CoseLayoutOptions
+            }
             elements={elements}
             style={{
               height: hasFiles(state)
@@ -380,7 +410,12 @@ function Graph() {
         ) : (
           <Center height="full" width="100vw">
             {isLoading ? (
-              <Spinner size="lg" color="blue.500" />
+              <VStack spacing={3}>
+                <Spinner size="lg" color="blue.500" />
+                <Text color="GrayText">
+                  {csvData.length ? 'Processing data' : 'Parsing logs'}
+                </Text>
+              </VStack>
             ) : (
               <VStack>
                 <Text fontWeight="bold">No data</Text>
