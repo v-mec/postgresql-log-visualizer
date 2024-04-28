@@ -1,15 +1,23 @@
 --- Vizualizační aplikace ---
 
-Vyžaduje NodeJS (testováno na verzi 20).
+Vyžaduje NodeJS (vyvíjeno na verzi 20).
 
-Spuštění: 
+Spuštění:
 
 - cd log-analyzer
-- npm install
+- npm install (může zobratovat upozornění)
 - npm start
 
 --- Vytížení databáze ---
 
-Vyžaduje Python3 a spuštěnou DB PostgreSQL.
+Vyžaduje Python3 a spuštěnou DB PostgreSQL s databází DVD Rental.
+Záloha databáze se nachází v souboru dvdrental.zip (zdroj: https://www.postgresqltutorial.com/postgresql-getting-started/postgresql-sample-database/)
 
-Spuštění: python3 log-gen.py <host> <databáze> <uživatel> <heslo> <počet vygenerovaných sekvencí> 
+Spuštění:
+
+- pip install psycopg2
+- python3 log-gen.py <host> <databáze> <uživatel> <heslo> <počet vygenerovaných sekvencí>
+
+--- Použítí aplikace ---
+
+Popsáno v dokumentu guide.pdf

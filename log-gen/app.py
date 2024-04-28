@@ -16,34 +16,40 @@ f.close()
 
 
 def execute_sql_sequence(sequence, num):
-    # Connect to PostgreSQL
-    conn = psycopg2.connect(
-        host=sys.argv[1], database=sys.argv[2], user=sys.argv[3], password=sys.argv[4]
-    )
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(
+            host=sys.argv[1],
+            database=sys.argv[2],
+            user=sys.argv[3],
+            password=sys.argv[4],
+        )
 
-    # Create a cursor and execute the SQL commands in the sequence
-    cur = conn.cursor()
-    for command in sequence:
-        cur.execute(command)
+        # Create a cursor and execute the SQL commands in the sequence
+        cur = conn.cursor()
+        for command in sequence:
+            cur.execute(command)
 
-    # Commit the changes, close the cursor, and close the connection
-    conn.commit()
-    cur.close()
-    conn.close()
+        # Commit the changes, close the cursor, and close the connection
+        conn.commit()
+        cur.close()
+        conn.close()
 
-    print("Executed sequence " + str(num))
+        print("Executed sequence " + str(num))
+    except Exception as e:
+        print(e)
 
 
 # Create a list of threads and start them
 threads = []
 for i in range(num_threads):
     # Select a random sequence from the list of command sequences
-    sequence = random.choice(
+    sequence = random.choices(
         command_sequences, weights=map(lambda x: x["weight"], command_sequences)
     )
 
     # Create a thread that executes the sequence X times
-    t = threading.Thread(target=execute_sql_sequence(sequence["sequence"], i))
+    t = threading.Thread(target=execute_sql_sequence(sequence[0]["sequence"], i))
     t.start()
     threads.append(t)
 

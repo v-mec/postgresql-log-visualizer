@@ -5,7 +5,7 @@
       "UPDATE address SET address = '123 Main St', district = 'Downtown', city_id = 1 WHERE address_id = (SELECT address_id FROM customer WHERE customer_id = 1);",
       "UPDATE customer SET active = 1 WHERE customer_id = 1;"
     ],
-    "weight": 10
+    "weight": 7
   },
   {
     "sequence": [
@@ -106,14 +106,6 @@
       "INSERT INTO customer(store_id, first_name, last_name, email, address_id, active) VALUES(2, 'Michael', 'Smith', 'michael.smith@example.com', 2, 1);"
     ],
     "weight": 5
-  },
-  {
-    "sequence": [
-      "SELECT staff_id FROM staff WHERE username = 'admin' AND password = 'password';",
-      "INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date) VALUES (456, 3, 1001, 7, now());",
-      "SELECT * FROM payment WHERE payment_id = currval('payment_payment_id_seq');"
-    ],
-    "weight": 1
   },
   {
     "sequence": [
